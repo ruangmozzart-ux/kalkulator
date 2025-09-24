@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Menggambar Modern dengan Supabase</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Impor Supabase Client -->
+    <script type="module">
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+        window.createClient = createClient;
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Mencegah scrolling saat menggambar di mobile */
+        }
+        .tool-button.active {
+            background-color: #4f46e5;
+            color: white;
+        }
+        .tool-button.active svg {
+            stroke: white;
+        }
+        /* Style untuk notifikasi */
+        #notification {
+            transition: transform 0.5s ease-in-out, opacity 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white overflow-hidden flex flex-col h-screen">
+
+    <!-- Kontrol atau Toolbar -->
+    <header class="bg-gray-800 shadow-lg p-2 z-10">
+        <div class="container mx-auto flex items-center justify-between flex-wrap gap-2">
+            <h1 class="text-xl font-bold text-indigo-400 hidden sm:block">Papan Gambar Digital</h1>
+            
+            <div class="flex items-center gap-2 bg-gray-900 p-2 rounded-lg">
+                <button id="brush-tool" class="tool-button p-2 rounded-md hover:bg-gray-700 transition-colors active" title="Kuas">
+                    <i data-lucide="paintbrush-2"></i>
+                </button>
+                <button id="eraser-tool" class="tool-button p-2 rounded-md hover:bg-gray-700 transition-colors" title="Penghapus">
+                    <i data-lucide="eraser"></i>
+                </button>
+            </div>
+
+            <div class="flex items-center gap-4 bg-gray-900 p-2 rounded-lg">
+                <div class="flex items-center gap-2" title="Warna Kuas">
+                    <i data-lucide="palette" class="text-gray-400"></i>
+                    <input type="color" id="color-picker" value="#FFFFFF" class="w-8 h-8 bg-transparent border-none rounded-md cursor-pointer">
+                </div>
+                <div class="flex items-center gap-2" title="Ukuran Kuas">
+                    <i data-lucide="ruler" class="text-gray-400"></i>
+                    <input type="range" id="brush-size" min="1" max="100" value="5" class="w-24 md:w-32 cursor-pointer">
+                    <span id="brush-size-label" class="text-sm w-6 text-center">5</span>
+                </div>
+            </div>
+
+            <!-- Aksi -->
+            <div class="flex items-center gap-2">
+                 <button id="save-drawing" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors" title="Simpan Gambar">
+                    <i data-lucide="save" class="w-5 h-5"></i>
+                    <span class="hidden md:inline">Simpan</span>
+                </button>
+                 <button id="load-drawing" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors" title="Muat Gambar Terakhir">
+                    <i data-lucide="upload" class="w-5 h-5"></i>
+                    <span class="hidden md:inline">Muat</span>
+                </button>
+                <button id="clear-canvas" class="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors" title="Bersihkan Kanvas">
+                    <i data-lucide="trash-2" class="w-5 h-5"></i>
+                </button>
+                <button id="download-image" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors" title="Unduh Gambar">
+                    <i data-lucide="download" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Kanvas untuk Menggambar -->
+    <main class="flex-grow relative">
+        <canvas id="drawing-canvas" class="bg-gray-900"></canvas>
+        <!-- Notifikasi -->
+        <div id="notification" class="absolute top-4 right-4 bg-indigo-600 text-white py-2 px-4 rounded-lg shadow-lg transform translate-x-full opacity-0">
+            Pesan notifikasi
+        </div>
+    </main>
+    
+    <script type="module">
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            
+            // Deklarasi konstanta elemen DOM
+            const canvas = document.getElementById('drawing-canvas');
+            const ctx = canvas.getContext('2d');
+            const notification = document.getElementById('notification');
+            const colorPicker = document.getElementById('color-picker');
+            const brushSizeSlider = document.getElementById('brush-size');
+            const brushSizeLabel = document.getElementById('brush-size-label');
+            const clearButton = document.getElementById('clear-canvas');
+            const downloadButton = document.getElementById('download-image');
+            const brushTool = document.getElementById('brush-tool');
+            const eraserTool = document.getElementById('eraser-tool');
+            const saveButton = document.getElementById('save-drawing');
+            const loadButton = document.getElementById('load-drawing');
+            
+            // Definisi fungsi notifikasi
+            function showNotification(message, type = 'success') {
+                notification.textContent = message;
+                notification.className = `absolute top-4 right-4 text-white py-2 px-4 rounded-lg shadow-lg transform translate-x-full opacity-0 ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
+                
+                // Animasikan masuk
+                setTimeout(() => {
+                    notification.classList.remove('translate-x-full', 'opacity-0');
+                    notification.classList.add('translate-x-0', 'opacity-100');
+                }, 100);
+
+                // Animasikan keluar
+                setTimeout(() => {
+                    notification.classList.remove('translate-x-0', 'opacity-100');
+                    notification.classList.add('translate-x-full', 'opacity-0');
+                }, 3000);
+            }
+
+            // --- PENGATURAN SUPABASE ---
+            // GANTI DENGAN URL DAN KUNCI ANON DARI PROYEK SUPABASE ANDA
+            const SUPABASE_URL = 'https://URL_PROYEK_ANDA.supabase.co'; 
+            const SUPABASE_ANON_KEY = 'KUNCI_ANON_ANDA';
+            
+            // Periksa apakah kredensial sudah diisi
+            if (SUPABASE_URL.includes('URL_PROYEK_ANDA') || SUPABASE_ANON_KEY.includes('KUNCI_ANON_ANDA')) {
+                showNotification('Harap konfigurasi Supabase URL dan Key di dalam kode!', 'error');
+            }
+            const supabase = window.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+            
+            let currentBrushSize = 5;
+            let currentColor = '#FFFFFF';
+            let isEraser = false;
+
+            function resizeCanvas() {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight - document.querySelector('header').offsetHeight;
+                ctx.putImageData(imageData, 0, 0);
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = currentBrushSize;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.globalCompositeOperation = isEraser ? 'destination-out' : 'source-over';
+            }
+
+            function getPointerPos(e) {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            }
+
+            function startDrawing(e) {
+                e.preventDefault();
+                isDrawing = true;
+                const pos = getPointerPos(e);
+                [lastX, lastY] = [pos.x, pos.y];
+                ctx.beginPath();
+                ctx.moveTo(lastX, lastY);
+            }
+
+            function draw(e) {
+                if (!isDrawing) return;
+                e.preventDefault();
+                const pos = getPointerPos(e);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+                [lastX, lastY] = [pos.x, pos.y];
+            }
+
+            function stopDrawing() {
+                if (!isDrawing) return;
+                ctx.closePath();
+                isDrawing = false;
+            }
+            
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            canvas.addEventListener('touchstart', startDrawing);
+            canvas.addEventListener('touchmove', draw);
+            canvas.addEventListener('touchend', stopDrawing);
+            canvas.addEventListener('touchcancel', stopDrawing);
+
+            colorPicker.addEventListener('change', (e) => {
+                currentColor = e.target.value;
+                ctx.strokeStyle = currentColor;
+                activateBrush();
+            });
+
+            brushSizeSlider.addEventListener('input', (e) => {
+                currentBrushSize = e.target.value;
+                brushSizeLabel.textContent = currentBrushSize;
+                ctx.lineWidth = currentBrushSize;
+            });
+
+            clearButton.addEventListener('click', () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+
+            downloadButton.addEventListener('click', () => {
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = canvas.width;
+                tempCanvas.height = canvas.height;
+                tempCtx.fillStyle = '#111827';
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.drawImage(canvas, 0, 0);
+                const link = document.createElement('a');
+                link.download = 'gambar-saya.png';
+                link.href = tempCanvas.toDataURL('image/png');
+                link.click();
+            });
+
+            // --- Fungsi Supabase ---
+
+            async function saveDrawingToSupabase() {
+                saveButton.disabled = true;
+                saveButton.classList.add('opacity-50', 'cursor-not-allowed');
+                const imageData = canvas.toDataURL('image/png');
+                const { data, error } = await supabase
+                    .from('drawings')
+                    .insert([{ image_data: imageData }]);
+                
+                if (error) {
+                    console.error('Gagal menyimpan gambar:', error);
+                    showNotification('Gagal menyimpan gambar!', 'error');
+                } else {
+                    console.log('Gambar berhasil disimpan:', data);
+                    showNotification('Gambar berhasil disimpan!');
+                }
+                saveButton.disabled = false;
+                saveButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+            
+            async function loadLastDrawingFromSupabase() {
+                loadButton.disabled = true;
+                loadButton.classList.add('opacity-50', 'cursor-not-allowed');
+                const { data, error } = await supabase
+                    .from('drawings')
+                    .select('image_data')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single(); // .single() untuk mengambil satu baris saja
+
+                if (error) {
+                    console.error('Gagal memuat gambar:', error);
+                    showNotification('Gagal memuat atau tidak ada gambar!', 'error');
+                } else if (data) {
+                    const img = new Image();
+                    img.src = data.image_data;
+                    img.onload = () => {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0);
+                        showNotification('Gambar terakhir berhasil dimuat!');
+                    };
+                    img.onerror = () => {
+                        showNotification('Gagal memuat data gambar!', 'error');
+                    };
+                }
+                loadButton.disabled = false;
+                loadButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+
+
+            saveButton.addEventListener('click', saveDrawingToSupabase);
+            loadButton.addEventListener('click', loadLastDrawingFromSupabase);
+
+            function activateBrush() {
+                isEraser = false;
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.strokeStyle = currentColor;
+                brushTool.classList.add('active');
+                eraserTool.classList.remove('active');
+            }
+
+            function activateEraser() {
+                isEraser = true;
+                ctx.globalCompositeOperation = 'destination-out';
+                eraserTool.classList.add('active');
+                brushTool.classList.remove('active');
+            }
+            
+            brushTool.addEventListener('click', activateBrush);
+            eraserTool.addEventListener('click', activateEraser);
+
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+            activateBrush();
+        });
+    </script>
+</body>
+</html>
